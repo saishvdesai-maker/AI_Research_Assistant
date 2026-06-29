@@ -12,7 +12,6 @@ import numpy as np
 from dotenv import load_dotenv
 
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
 # ----------------------------
@@ -100,14 +99,6 @@ class User(BaseModel):
 # ----------------------------
 # LAZY MODEL (FIX MEMORY CRASH)
 # ----------------------------
-model = None
-
-
-def get_model():
-    global model
-    if model is None:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-    return model
 
 
 # ----------------------------
@@ -203,7 +194,7 @@ def upload(file: UploadFile = File(...)):
         text = page.extract_text() or ""
         chunks.append({"text": text, "page": i + 1})
 
-    embeddings = get_model().encode([c["text"] for c in chunks])
+   embeddings = None
 
     pdf_store[file.filename] = {
         "chunks": chunks,
@@ -223,17 +214,11 @@ def ask(q: str, username: str = Depends(get_user)):
 
     data = pdf_store[current_pdf]
 
-    query = get_model().encode([q])[0]
+    context = ""
 
-    scores = []
-    for i, emb in enumerate(data["embeddings"]):
-        scores.append((np.dot(query, emb), i))
-
-    scores.sort(reverse=True)
-
-    context = "\n".join(
-        [data["chunks"][i]["text"] for _, i in scores[:3]]
-    )
+for chunk in data["chunks"][:3]:
+    context += chunk["text"] + "\n"
+    
 
     prompt = f"""
 Use this PDF:
