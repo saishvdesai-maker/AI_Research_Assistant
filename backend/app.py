@@ -147,7 +147,7 @@ def register(user: User):
 
 
 @app.post("/login")
-def login(form_data: OAuth2PasswordPasswordRequestForm = Depends()):
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
