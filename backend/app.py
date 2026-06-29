@@ -1,0 +1,436 @@
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from jose import jwt, JWTError
+
+import sqlite3
+import shutil
+import re
+import os
+import numpy as np
+
+from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
+from openai import OpenAI
+
+
+app = FastAPI()
+
+
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+
+@app.get("/")
+def home():
+    return FileResponse("frontend/index.html")
+
+
+DB = "app.db"
+
+
+def init_db():
+
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        approved INTEGER DEFAULT 0
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS chats(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        question TEXT,
+        answer TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+SECRET_KEY = "supersecretkey"
+ALGORITHM = "HS256"
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="login"
+)
+
+
+def create_token(username):
+
+    return jwt.encode(
+        {"sub":username},
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+
+def get_user(token:str=Depends(oauth2_scheme)):
+
+    try:
+
+        data = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        return data["sub"]
+
+    except:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token"
+        )
+
+
+class User(BaseModel):
+
+    username:str
+    password:str
+
+
+
+model = SentenceTransformer(
+    "all-MiniLM-L6-v2"
+)
+
+
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY")
+)
+
+UPLOAD_DIR="uploads"
+
+os.makedirs(
+    UPLOAD_DIR,
+    exist_ok=True
+)
+
+
+pdf_store={}
+current_pdf=None
+
+
+
+@app.post("/register")
+def register(user:User):
+
+    conn=sqlite3.connect(DB)
+    cur=conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO users(username,password)
+        VALUES(?,?)
+        """,
+        (
+        user.username,
+        user.password
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message":"waiting approval"
+    }
+
+
+
+
+@app.post("/login")
+def login(
+    form_data:OAuth2PasswordRequestForm=Depends()
+):
+
+    conn=sqlite3.connect(DB)
+    cur=conn.cursor()
+
+    cur.execute(
+        """
+        SELECT password,approved
+        FROM users
+        WHERE username=?
+        """,
+        (
+        form_data.username,
+        )
+    )
+
+    row=cur.fetchone()
+
+    conn.close()
+
+
+    if not row:
+        return {"message":"not found"}
+
+
+    if row[0]!=form_data.password:
+        return {"message":"wrong password"}
+
+
+    if row[1]==0:
+        return {"message":"not approved"}
+
+
+    return {
+
+        "access_token":
+        create_token(form_data.username),
+
+        "token_type":"bearer"
+
+    }
+
+
+
+
+
+@app.post("/admin/approve")
+def approve(username:str):
+
+    conn=sqlite3.connect(DB)
+    cur=conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE users
+        SET approved=1
+        WHERE username=?
+        """,
+        (username,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message":"approved"
+    }
+
+
+
+
+
+@app.post("/upload")
+def upload(file:UploadFile=File(...)):
+
+    global current_pdf
+
+
+    path=os.path.join(
+        UPLOAD_DIR,
+        file.filename
+    )
+
+
+    with open(path,"wb") as f:
+
+        shutil.copyfileobj(
+            file.file,
+            f
+        )
+
+
+    reader=PdfReader(path)
+
+
+    chunks=[]
+
+
+    for page,page_data in enumerate(reader.pages):
+
+        text=page_data.extract_text() or ""
+
+        chunks.append({
+
+            "text":text,
+
+            "page":page+1
+
+        })
+
+
+
+    embeddings=model.encode(
+        [
+        x["text"]
+        for x in chunks
+        ]
+    )
+
+
+    pdf_store[file.filename]={
+
+        "chunks":chunks,
+
+        "embeddings":embeddings
+
+    }
+
+
+    current_pdf=file.filename
+
+
+    return {
+        "message":"uploaded"
+    }
+
+
+
+
+
+@app.get("/ask")
+def ask(
+    q:str,
+    username:str=Depends(get_user)
+):
+
+
+    data=pdf_store[current_pdf]
+
+
+    query=model.encode([q])[0]
+
+
+    scores=[]
+
+
+    for i,e in enumerate(data["embeddings"]):
+
+        score=np.dot(query,e)
+
+        scores.append(
+            (score,i)
+        )
+
+
+    scores.sort(reverse=True)
+
+
+    context="\n".join(
+
+        [
+        data["chunks"][i]["text"]
+        for _,i in scores[:3]
+        ]
+
+    )
+
+
+
+    prompt=f"""
+
+Use this PDF:
+
+{context}
+
+
+Question:
+
+{q}
+
+Answer:
+
+"""
+
+
+
+    response=client.chat.completions.create(
+
+        model="gpt-4.1-mini",
+
+        messages=[
+
+            {
+            "role":"user",
+            "content":prompt
+            }
+
+        ]
+
+    )
+
+
+    answer=response.choices[0].message.content
+
+
+
+    conn=sqlite3.connect(DB)
+    cur=conn.cursor()
+
+
+    cur.execute(
+        """
+        INSERT INTO chats(username,question,answer)
+        VALUES(?,?,?)
+        """,
+        (
+        username,
+        q,
+        answer
+        )
+    )
+
+
+    conn.commit()
+    conn.close()
+
+
+
+    return {
+        "answer":answer
+    }
+
+
+
+
+
+@app.get("/dashboard")
+def dashboard(
+    username:str=Depends(get_user)
+):
+
+    conn=sqlite3.connect(DB)
+    cur=conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM chats
+        WHERE username=?
+        """,
+        (username,)
+    )
+
+
+    total=cur.fetchone()[0]
+
+
+    conn.close()
+
+
+    return {
+
+        "user":username,
+
+        "questions":total
+
+    }

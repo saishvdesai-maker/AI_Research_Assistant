@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<title>Admin Panel</title>
+
+<style>
+
+body{
+background:#0f172a;
+color:white;
+font-family:Arial;
+padding:30px;
+}
+
+
+.card{
+
+background:#1f2937;
+padding:15px;
+margin:10px;
+border-radius:10px;
+
+}
+
+
+button{
+
+background:#2563eb;
+color:white;
+border:none;
+padding:10px;
+border-radius:8px;
+cursor:pointer;
+
+}
+
+</style>
+
+
+</head>
+
+
+<body>
+
+
+<h1>👑 Admin Panel</h1>
+
+
+<div id="users"></div>
+
+
+
+<script>
+
+
+async function loadUsers(){
+
+
+const res = await fetch("/admin/users");
+
+const data = await res.json();
+
+
+let html="";
+
+
+data.users.forEach(u=>{
+
+
+html += `
+
+<div class="card">
+
+<h3>${u.username}</h3>
+
+<p>Status:
+${u.approved ? "Approved ✅" : "Pending ⏳"}
+
+</p>
+
+
+<button onclick="approve('${u.username}')">
+
+Approve
+
+</button>
+
+
+</div>
+
+`;
+
+
+});
+
+
+document.getElementById("users").innerHTML=html;
+
+
+}
+
+
+
+async function approve(username){
+
+
+await fetch(
+"/admin/approve?username="+username,
+{
+method:"POST"
+}
+);
+
+
+loadUsers();
+
+
+}
+
+
+
+loadUsers();
+
+
+</script>
+
+
+
+</body>
+
+
+</html>
