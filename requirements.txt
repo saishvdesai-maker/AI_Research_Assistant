@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-python-multipart
-pypdf
-numpy
-sentence-transformers
-python-jose
-openai
