@@ -25,6 +25,7 @@ if os.path.exists("frontend"):
 def home():
     if os.path.exists("frontend/index.html"):
         return FileResponse("frontend/index.html")
+
     return {"message": "AI Research Assistant API Running"}
 
 
@@ -34,7 +35,6 @@ DB = "app.db"
 def init_db():
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,10 +196,10 @@ Question:
             model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}]
         )
-
-        answer = response.choices[0].message.content
-    else:
-        answer = "OpenAI key missing"
+          
+    answer = response.choices[0].message.content
+    
+    answer = "OpenAI key missing"
 
     conn = sqlite3.connect(DB)
     cur = conn.cursor()

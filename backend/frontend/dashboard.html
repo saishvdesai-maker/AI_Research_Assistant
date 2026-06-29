@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>AI SaaS Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+
+        body {
+            margin: 0;
+            font-family: Arial;
+            background: #0b1220;
+            color: white;
+        }
+
+        #topbar {
+            background: #111827;
+            padding: 15px 20px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .card {
+            background: #1f2937;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .stat {
+            font-size: 32px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .log {
+            font-size: 14px;
+            opacity: 0.85;
+            margin: 5px 0;
+        }
+
+        canvas {
+            background: white;
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+    </style>
+</head>
+
+<body>
+
+<div id="topbar">
+    🚀 AI Research SaaS Dashboard
+</div>
+
+<div id="grid">
+
+    <div class="card">
+        <h3>Total Questions</h3>
+        <div class="stat" id="total"></div>
+    </div>
+
+    <div class="card">
+        <h3>Top PDF</h3>
+        <div class="stat" id="topPdf"></div>
+    </div>
+
+    <div class="card">
+        <h3>Recent Activity</h3>
+        <div id="logs"></div>
+    </div>
+
+    <div class="card">
+        <h3>Usage Trend</h3>
+        <canvas id="lineChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>PDF Usage</h3>
+        <canvas id="barChart"></canvas>
+    </div>
+
+</div>
+
+<script>
+
+async function loadDashboard() {
+
+    const res = await fetch("/dashboard", {
+        headers: {
+            "Authorization": "Bearer " + localStorage.getItem("token")
+        }
+    });
+
+    const data = await res.json();
+
+    document.getElementById("total").innerText = data.total_questions;
+    document.getElementById("topPdf").innerText = data.top_pdf || "N/A";
+
+    let logsHTML = "";
+    data.logs.forEach(l => {
+        logsHTML += `<div class="log">• ${l.event} → ${l.value}</div>`;
+    });
+    document.getElementById("logs").innerHTML = logsHTML;
+
+    // LINE CHART
+    new Chart(document.getElementById("lineChart"), {
+        type: "line",
+        data: {
+            labels: ["Mon", "Tue", "Wed", "Thu"],
+            datasets: [{
+                label: "Questions",
+                data: [5, 10, 18, data.total_questions],
+                borderColor: "#3b82f6",
+                fill: false
+            }]
+        }
+    });
+
+    // BAR CHART
+    new Chart(document.getElementById("barChart"), {
+        type: "bar",
+        data: {
+            labels: ["PDF A", "PDF B", "PDF C"],
+            datasets: [{
+                label: "Usage",
+                data: [4, 7, 3],
+                backgroundColor: ["#ef4444", "#22c55e", "#3b82f6"]
+            }]
+        }
+    });
+}
+
+loadDashboard();
+
+</script>
+
+</body>
+</html>
