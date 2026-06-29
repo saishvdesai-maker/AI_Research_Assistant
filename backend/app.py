@@ -8,22 +8,15 @@ from jose import jwt
 import sqlite3
 import shutil
 import os
-import numpy as np
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from pypdf import PdfReader
 from openai import OpenAI
 
-# ----------------------------
-# ENV LOAD
-# ----------------------------
 load_dotenv()
 
 app = FastAPI()
 
-# ----------------------------
-# STATIC FRONTEND SAFE
-# ----------------------------
 if os.path.exists("frontend"):
     app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
@@ -35,9 +28,6 @@ def home():
     return {"message": "AI Research Assistant API Running"}
 
 
-# ----------------------------
-# DATABASE
-# ----------------------------
 DB = "app.db"
 
 
@@ -69,17 +59,13 @@ def init_db():
 
 init_db()
 
-
-# ----------------------------
-# AUTH
-# ----------------------------
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
-def create_token(username: str):
+def create_token(username):
     return jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -96,31 +82,19 @@ class User(BaseModel):
     password: str
 
 
-# ----------------------------
-# LAZY MODEL (FIX MEMORY CRASH)
-# ----------------------------
-
-
-# ----------------------------
-# OPENAI SAFE INIT
-# ----------------------------
+client = None
 api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key) if api_key else None
+
+if api_key:
+    client = OpenAI(api_key=api_key)
 
 
-# ----------------------------
-# STORAGE
-# ----------------------------
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 pdf_store = {}
-current_pdf = None
 
 
-# ----------------------------
-# ROUTES
-# ----------------------------
 @app.post("/register")
 def register(user: User):
     conn = sqlite3.connect(DB)
@@ -143,34 +117,37 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT password,approved FROM users WHERE username=?",
+        "SELECT username,password,approved FROM users WHERE username=?",
         (form_data.username,)
     )
 
-    row = cur.fetchone()
+    user = cur.fetchone()
     conn.close()
 
-    if not row:
-        return {"message": "not found"}
+    if not user:
+        raise HTTPException(404, "User not found")
 
-    if row[0] != form_data.password:
-        return {"message": "wrong password"}
+    if user[1] != form_data.password:
+        raise HTTPException(401, "Wrong password")
 
-    if row[1] == 0:
-        return {"message": "not approved"}
+    if user[2] == 0:
+        raise HTTPException(403, "Account waiting approval")
 
     return {
-        "access_token": create_token(form_data.username),
+        "access_token": create_token(user[0]),
         "token_type": "bearer"
     }
 
 
-@app.post("/admin/approve")
-def approve(username: str):
+@app.post("/approve/{username}")
+def approve_user(username: str):
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
-    cur.execute("UPDATE users SET approved=1 WHERE username=?", (username,))
+    cur.execute(
+        "UPDATE users SET approved=1 WHERE username=?",
+        (username,)
+    )
 
     conn.commit()
     conn.close()
@@ -179,56 +156,39 @@ def approve(username: str):
 
 
 @app.post("/upload")
-def upload(file: UploadFile = File(...)):
-    global current_pdf
-
+def upload_pdf(file: UploadFile = File(...), username: str = Depends(get_user)):
     path = os.path.join(UPLOAD_DIR, file.filename)
 
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    with open(path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
     reader = PdfReader(path)
 
-    chunks = []
-    for i, page in enumerate(reader.pages):
-        text = page.extract_text() or ""
-        chunks.append({"text": text, "page": i + 1})
+    text = ""
 
-    
+    for page in reader.pages:
+        text += page.extract_text() or ""
+
+    pdf_store[username] = text
+
+    return {"message": "PDF uploaded"}
 
 
-embeddings = None
+class Question(BaseModel):
+    question: str
 
-    pdf_store[file.filename] = {
-        "chunks": chunks,
-        "embeddings": embeddings
-    }
 
-    current_pdf = file.filename
+@app.post("/ask")
+def ask(data: Question, username: str = Depends(get_user)):
 
-    return {"message": "uploaded"}
-@app.get("/ask")
-def ask(q: str, username: str = Depends(get_user)):
-
-    if current_pdf is None:
-        return {"error": "No PDF uploaded"}
-
-    data = pdf_store[current_pdf]
-
-    context = ""
-
-for chunk in data["chunks"][:3]:
-    context += chunk["text"] + "\n"
-    
+    pdf_text = pdf_store.get(username, "")
 
     prompt = f"""
 Use this PDF:
-{context}
+{pdf_text[:8000]}
 
 Question:
-{q}
-
-Answer:
+{data.question}
 """
 
     if client:
@@ -236,16 +196,17 @@ Answer:
             model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}]
         )
+
         answer = response.choices[0].message.content
     else:
-        answer = "OPENAI_API_KEY not set"
+        answer = "OpenAI key missing"
 
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
     cur.execute(
         "INSERT INTO chats(username,question,answer) VALUES(?,?,?)",
-        (username, q, answer)
+        (username, data.question, answer)
     )
 
     conn.commit()
@@ -254,22 +215,18 @@ Answer:
     return {"answer": answer}
 
 
-@app.get("/dashboard")
-def dashboard(username: str = Depends(get_user)):
+@app.get("/history")
+def history(username: str = Depends(get_user)):
 
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT COUNT(*) FROM chats WHERE username=?",
+        "SELECT question,answer FROM chats WHERE username=?",
         (username,)
     )
 
-    total = cur.fetchone()[0]
-
+    rows = cur.fetchall()
     conn.close()
 
-    return {
-        "user": username,
-        "questions": total
-    }
+    return rows
