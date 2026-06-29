@@ -3,11 +3,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from jose import jwt, JWTError
+from jose import jwt
 
 import sqlite3
 import shutil
-import re
 import os
 import numpy as np
 
@@ -15,23 +14,33 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
-
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
+# ----------------------------
+# Static frontend (safe path)
+# ----------------------------
+if os.path.exists("frontend"):
+    app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
 @app.get("/")
 def home():
-    return FileResponse("frontend/index.html")
+    if os.path.exists("frontend/index.html"):
+        return FileResponse("frontend/index.html")
+    return {"message": "Backend is running"}
 
 
+# ----------------------------
+# DB
+# ----------------------------
 DB = "app.db"
 
 
 def init_db():
-
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
@@ -59,378 +68,220 @@ def init_db():
 
 init_db()
 
-
+# ----------------------------
+# AUTH
+# ----------------------------
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="login"
-)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
-def create_token(username):
-
-    return jwt.encode(
-        {"sub":username},
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
+def create_token(username: str):
+    return jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_user(token:str=Depends(oauth2_scheme)):
-
+def get_user(token: str = Depends(oauth2_scheme)):
     try:
-
-        data = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
-        )
-
+        data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return data["sub"]
-
     except:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 class User(BaseModel):
-
-    username:str
-    password:str
-
+    username: str
+    password: str
 
 
-model = SentenceTransformer(
-    "all-MiniLM-L6-v2"
-)
+# ----------------------------
+# LAZY AI MODEL (IMPORTANT FIX)
+# ----------------------------
+model = None
 
 
-client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
-)
-
-UPLOAD_DIR="uploads"
-
-os.makedirs(
-    UPLOAD_DIR,
-    exist_ok=True
-)
+def get_model():
+    global model
+    if model is None:
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+    return model
 
 
-pdf_store={}
-current_pdf=None
+# ----------------------------
+# OPENAI SAFE INIT
+# ----------------------------
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key) if api_key else None
 
 
+# ----------------------------
+# STORAGE
+# ----------------------------
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+pdf_store = {}
+current_pdf = None
+
+
+# ----------------------------
+# ROUTES
+# ----------------------------
 @app.post("/register")
-def register(user:User):
-
-    conn=sqlite3.connect(DB)
-    cur=conn.cursor()
+def register(user: User):
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
 
     cur.execute(
-        """
-        INSERT INTO users(username,password)
-        VALUES(?,?)
-        """,
-        (
-        user.username,
-        user.password
-        )
+        "INSERT INTO users(username,password) VALUES(?,?)",
+        (user.username, user.password)
     )
 
     conn.commit()
     conn.close()
 
-    return {
-        "message":"waiting approval"
-    }
-
-
+    return {"message": "waiting approval"}
 
 
 @app.post("/login")
-def login(
-    form_data:OAuth2PasswordRequestForm=Depends()
-):
-
-    conn=sqlite3.connect(DB)
-    cur=conn.cursor()
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
 
     cur.execute(
-        """
-        SELECT password,approved
-        FROM users
-        WHERE username=?
-        """,
-        (
-        form_data.username,
-        )
+        "SELECT password,approved FROM users WHERE username=?",
+        (form_data.username,)
     )
 
-    row=cur.fetchone()
-
+    row = cur.fetchone()
     conn.close()
 
-
     if not row:
-        return {"message":"not found"}
+        return {"message": "not found"}
 
+    if row[0] != form_data.password:
+        return {"message": "wrong password"}
 
-    if row[0]!=form_data.password:
-        return {"message":"wrong password"}
-
-
-    if row[1]==0:
-        return {"message":"not approved"}
-
+    if row[1] == 0:
+        return {"message": "not approved"}
 
     return {
-
-        "access_token":
-        create_token(form_data.username),
-
-        "token_type":"bearer"
-
+        "access_token": create_token(form_data.username),
+        "token_type": "bearer"
     }
-
-
-
 
 
 @app.post("/admin/approve")
-def approve(username:str):
+def approve(username: str):
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
 
-    conn=sqlite3.connect(DB)
-    cur=conn.cursor()
-
-    cur.execute(
-        """
-        UPDATE users
-        SET approved=1
-        WHERE username=?
-        """,
-        (username,)
-    )
+    cur.execute("UPDATE users SET approved=1 WHERE username=?", (username,))
 
     conn.commit()
     conn.close()
 
-    return {
-        "message":"approved"
-    }
-
-
-
+    return {"message": "approved"}
 
 
 @app.post("/upload")
-def upload(file:UploadFile=File(...)):
-
+def upload(file: UploadFile = File(...)):
     global current_pdf
 
+    path = os.path.join(UPLOAD_DIR, file.filename)
 
-    path=os.path.join(
-        UPLOAD_DIR,
-        file.filename
-    )
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
 
+    reader = PdfReader(path)
 
-    with open(path,"wb") as f:
+    chunks = []
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        chunks.append({"text": text, "page": page_num + 1})
 
-        shutil.copyfileobj(
-            file.file,
-            f
-        )
+    embeddings = get_model().encode([c["text"] for c in chunks])
 
-
-    reader=PdfReader(path)
-
-
-    chunks=[]
-
-
-    for page,page_data in enumerate(reader.pages):
-
-        text=page_data.extract_text() or ""
-
-        chunks.append({
-
-            "text":text,
-
-            "page":page+1
-
-        })
-
-
-
-    embeddings=model.encode(
-        [
-        x["text"]
-        for x in chunks
-        ]
-    )
-
-
-    pdf_store[file.filename]={
-
-        "chunks":chunks,
-
-        "embeddings":embeddings
-
+    pdf_store[file.filename] = {
+        "chunks": chunks,
+        "embeddings": embeddings
     }
 
+    current_pdf = file.filename
 
-    current_pdf=file.filename
-
-
-    return {
-        "message":"uploaded"
-    }
-
-
-
+    return {"message": "uploaded"}
 
 
 @app.get("/ask")
-def ask(
-    q:str,
-    username:str=Depends(get_user)
-):
+def ask(q: str, username: str = Depends(get_user)):
 
+    if current_pdf is None:
+        return {"error": "No PDF uploaded"}
 
-    data=pdf_store[current_pdf]
+    data = pdf_store[current_pdf]
 
+    query = get_model().encode([q])[0]
 
-    query=model.encode([q])[0]
-
-
-    scores=[]
-
-
-    for i,e in enumerate(data["embeddings"]):
-
-        score=np.dot(query,e)
-
-        scores.append(
-            (score,i)
-        )
-
+    scores = []
+    for i, emb in enumerate(data["embeddings"]):
+        score = np.dot(query, emb)
+        scores.append((score, i))
 
     scores.sort(reverse=True)
 
-
-    context="\n".join(
-
-        [
-        data["chunks"][i]["text"]
-        for _,i in scores[:3]
-        ]
-
+    context = "\n".join(
+        [data["chunks"][i]["text"] for _, i in scores[:3]]
     )
 
-
-
-    prompt=f"""
-
+    prompt = f"""
 Use this PDF:
-
 {context}
 
-
 Question:
-
 {q}
 
 Answer:
-
 """
 
+    if client:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        answer = response.choices[0].message.content
+    else:
+        answer = "OPENAI_API_KEY not set"
 
-
-    response=client.chat.completions.create(
-
-        model="gpt-4.1-mini",
-
-        messages=[
-
-            {
-            "role":"user",
-            "content":prompt
-            }
-
-        ]
-
-    )
-
-
-    answer=response.choices[0].message.content
-
-
-
-    conn=sqlite3.connect(DB)
-    cur=conn.cursor()
-
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
 
     cur.execute(
-        """
-        INSERT INTO chats(username,question,answer)
-        VALUES(?,?,?)
-        """,
-        (
-        username,
-        q,
-        answer
-        )
+        "INSERT INTO chats(username,question,answer) VALUES(?,?,?)",
+        (username, q, answer)
     )
-
 
     conn.commit()
     conn.close()
 
-
-
-    return {
-        "answer":answer
-    }
-
-
-
+    return {"answer": answer}
 
 
 @app.get("/dashboard")
-def dashboard(
-    username:str=Depends(get_user)
-):
+def dashboard(username: str = Depends(get_user)):
 
-    conn=sqlite3.connect(DB)
-    cur=conn.cursor()
-
+    conn = sqlite3.connect(DB)
+    cur = conn.cursor()
 
     cur.execute(
-        """
-        SELECT COUNT(*)
-        FROM chats
-        WHERE username=?
-        """,
+        "SELECT COUNT(*) FROM chats WHERE username=?",
         (username,)
     )
 
-
-    total=cur.fetchone()[0]
-
+    total = cur.fetchone()[0]
 
     conn.close()
 
-
     return {
-
-        "user":username,
-
-        "questions":total
-
+        "user": username,
+        "questions": total
     }
