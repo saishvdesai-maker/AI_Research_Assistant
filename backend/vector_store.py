@@ -1,10 +1,18 @@
 import chromadb
 
-client = chromadb.PersistentClient(path="./chroma_db")
+client = None
 
-collection = client.get_or_create_collection(
-    name="papers"
-)
+
+def get_client():
+    global client
+
+    if client is None:
+        client = chromadb.PersistentClient(
+            path="./chroma_db"
+        )
+
+    return client
+collection = get_client().get_or_create_collection(...)
 
 
 def add_chunks(chunks):

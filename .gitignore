@@ -1,5 +1,8 @@
-.env
+chroma_db/
+papers/
+*.db
+*.pdf
 __pycache__/
 *.pyc
-uploads/
-app.db
+.env
+backend/.env
