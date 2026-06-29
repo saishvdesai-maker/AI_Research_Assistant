@@ -9,19 +9,21 @@ import sqlite3
 import shutil
 import os
 import numpy as np
+from dotenv import load_dotenv
 
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
-from dotenv import load_dotenv
-
+# ----------------------------
+# ENV LOAD
+# ----------------------------
 load_dotenv()
 
 app = FastAPI()
 
 # ----------------------------
-# Static frontend (safe path)
+# STATIC FRONTEND SAFE
 # ----------------------------
 if os.path.exists("frontend"):
     app.mount("/static", StaticFiles(directory="frontend"), name="static")
@@ -31,11 +33,11 @@ if os.path.exists("frontend"):
 def home():
     if os.path.exists("frontend/index.html"):
         return FileResponse("frontend/index.html")
-    return {"message": "Backend is running"}
+    return {"message": "AI Research Assistant API Running"}
 
 
 # ----------------------------
-# DB
+# DATABASE
 # ----------------------------
 DB = "app.db"
 
@@ -68,6 +70,7 @@ def init_db():
 
 init_db()
 
+
 # ----------------------------
 # AUTH
 # ----------------------------
@@ -95,7 +98,7 @@ class User(BaseModel):
 
 
 # ----------------------------
-# LAZY AI MODEL (IMPORTANT FIX)
+# LAZY MODEL (FIX MEMORY CRASH)
 # ----------------------------
 model = None
 
@@ -144,7 +147,7 @@ def register(user: User):
 
 
 @app.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
+def login(form_data: OAuth2PasswordPasswordRequestForm = Depends()):
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
@@ -196,9 +199,9 @@ def upload(file: UploadFile = File(...)):
     reader = PdfReader(path)
 
     chunks = []
-    for page_num, page in enumerate(reader.pages):
+    for i, page in enumerate(reader.pages):
         text = page.extract_text() or ""
-        chunks.append({"text": text, "page": page_num + 1})
+        chunks.append({"text": text, "page": i + 1})
 
     embeddings = get_model().encode([c["text"] for c in chunks])
 
@@ -224,8 +227,7 @@ def ask(q: str, username: str = Depends(get_user)):
 
     scores = []
     for i, emb in enumerate(data["embeddings"]):
-        score = np.dot(query, emb)
-        scores.append((score, i))
+        scores.append((np.dot(query, emb), i))
 
     scores.sort(reverse=True)
 
