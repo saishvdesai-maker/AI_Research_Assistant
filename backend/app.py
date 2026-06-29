@@ -194,7 +194,10 @@ def upload(file: UploadFile = File(...)):
         text = page.extract_text() or ""
         chunks.append({"text": text, "page": i + 1})
 
-   embeddings = None
+    
+
+
+embeddings = None
 
     pdf_store[file.filename] = {
         "chunks": chunks,
@@ -204,8 +207,6 @@ def upload(file: UploadFile = File(...)):
     current_pdf = file.filename
 
     return {"message": "uploaded"}
-
-
 @app.get("/ask")
 def ask(q: str, username: str = Depends(get_user)):
 
