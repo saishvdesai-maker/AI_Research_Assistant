@@ -1,135 +1,243 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Research Assistant</title>
+<title>AI Research Assistant</title>
 
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial;
-            background: #0b1220;
-            color: white;
-        }
+<style>
+*{
+    box-sizing:border-box;
+}
 
-        /* LAYOUT */
-        #app {
-            display: flex;
-            height: 100vh;
-        }
+body{
+    margin:0;
+    font-family:Inter,Segoe UI,Arial;
+    background:
+    radial-gradient(circle at top,#1e3a8a,#020617 60%);
+    color:white;
+}
 
-        /* SIDEBAR */
-        #sidebar {
-            width: 25%;
-            background: #111827;
-            padding: 15px;
-            display: flex;
-            flex-direction: column;
-        }
+#app{
+    height:100vh;
+    display:flex;
+    padding:20px;
+    gap:20px;
+}
 
-        #pdfList {
-            flex: 1;
-            margin-top: 10px;
-            overflow-y: auto;
-        }
 
-        .pdf-item {
-            padding: 10px;
-            background: #1f2937;
-            margin-bottom: 8px;
-            cursor: pointer;
-            border-radius: 5px;
-        }
+/* SIDEBAR */
 
-        .pdf-item:hover {
-            background: #374151;
-        }
+#sidebar{
+    width:280px;
+    background:rgba(15,23,42,.75);
+    backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:20px;
+    padding:20px;
+}
 
-        /* MAIN CHAT */
-        #main {
-            width: 75%;
-            display: flex;
-            flex-direction: column;
-        }
 
-        #chat {
-            flex: 1;
-            padding: 15px;
-            overflow-y: auto;
-        }
+.logo{
+    font-size:22px;
+    font-weight:700;
+    margin-bottom:20px;
+}
 
-        .msg {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 10px;
-        }
 
-        .user {
-            background: #1e293b;
-            text-align: right;
-        }
+.upload{
+    background:#111827;
+    padding:15px;
+    border-radius:15px;
+}
 
-        .ai {
-            background: #334155;
-        }
 
-        /* INPUT */
-        #inputBox {
-            display: flex;
-            padding: 10px;
-            background: #111827;
-        }
+input[type=file]{
+    width:100%;
+    margin-bottom:12px;
+}
 
-        #question {
-            flex: 1;
-            padding: 10px;
-        }
 
-        button {
-            padding: 10px;
-            background: #2563eb;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
+button{
+    width:100%;
+    padding:12px;
+    border:none;
+    border-radius:12px;
+    background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+    color:white;
+    cursor:pointer;
+    font-weight:600;
+}
 
-        /* UPLOAD */
-        input[type=file] {
-            margin-bottom: 10px;
-        }
-    </style>
+
+#pdfList{
+    margin-top:20px;
+}
+
+
+.pdf-item{
+    background:#1e293b;
+    padding:12px;
+    border-radius:12px;
+    margin-bottom:10px;
+}
+
+
+
+/* CHAT */
+
+
+#main{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    background:rgba(15,23,42,.65);
+    backdrop-filter:blur(20px);
+    border-radius:20px;
+    border:1px solid rgba(255,255,255,.1);
+}
+
+
+.header{
+    padding:20px;
+    font-size:22px;
+    border-bottom:1px solid rgba(255,255,255,.1);
+}
+
+
+#chat{
+    flex:1;
+    padding:25px;
+    overflow:auto;
+}
+
+
+.msg{
+    max-width:70%;
+    padding:15px;
+    margin:15px;
+    border-radius:18px;
+    line-height:1.5;
+}
+
+
+.user{
+    margin-left:auto;
+    background:#2563eb;
+}
+
+
+.ai{
+    background:#1e293b;
+}
+
+
+
+#inputBox{
+    display:flex;
+    padding:20px;
+    gap:10px;
+}
+
+
+#question{
+    flex:1;
+    padding:15px;
+    border-radius:15px;
+    border:none;
+    outline:none;
+    background:#020617;
+    color:white;
+}
+
+
+#inputBox button{
+    width:120px;
+}
+
+</style>
+
 </head>
+
 
 <body>
 
+
 <div id="app">
 
-    <!-- SIDEBAR -->
-    <div id="sidebar">
 
-        <h3>📄 PDFs</h3>
+<div id="sidebar">
 
-        <input type="file" id="pdfFile">
-        <button onclick="uploadPDF()">Upload PDF</button>
+<div class="logo">
+🤖 AI Research
+</div>
 
-        <div id="pdfList"></div>
 
-    </div>
+<div class="upload">
 
-    <!-- CHAT -->
-    <div id="main">
+<input type="file" id="pdfFile">
 
-        <div id="chat"></div>
-
-        <div id="inputBox">
-            <input id="question" placeholder="Ask something...">
-            <button onclick="askQuestion()">Send</button>
-        </div>
-
-    </div>
+<button onclick="uploadPDF()">
+Upload PDF
+</button>
 
 </div>
 
+
+<h3>Documents</h3>
+
+<div id="pdfList"></div>
+
+
+</div>
+
+
+
+
+
+<div id="main">
+
+
+<div class="header">
+AI Research Assistant
+</div>
+
+
+<div id="chat">
+
+<div class="msg ai">
+👋 Hello! Upload a paper and ask me anything.
+</div>
+
+
+</div>
+
+
+
+<div id="inputBox">
+
+<input 
+id="question"
+placeholder="Ask your research question..."
+>
+
+
+<button onclick="askQuestion()">
+Send
+</button>
+
+
+</div>
+
+
+</div>
+
+
+
+</div>
+
+
+
 <script src="/static/script.js"></script>
+
 
 </body>
 </html>
